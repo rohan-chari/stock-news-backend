@@ -73,7 +73,9 @@ class BrowserManager {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
+        '--start-maximized', // Start browser maximized
       ],
+      defaultViewport: null, // Use default viewport (full screen)
     });
 
     console.log('Browser initialized successfully');
@@ -87,6 +89,8 @@ class BrowserManager {
   async createPage() {
     const browser = await this.getBrowser();
     const page = await browser.newPage();
+    // Set viewport to full screen size
+    await page.setViewport({ width: 1920, height: 1080 });
     return page;
   }
 
