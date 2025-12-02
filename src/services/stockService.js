@@ -47,8 +47,8 @@ const checkStockLogo = async (query) => {
 };
 
 /**
- * Download image from URL and save to disk
- * @param {string} imageUrl - URL of the image to download
+ * Download image from URL or data URL and save to disk
+ * @param {string} imageUrl - URL of the image to download or data URL
  * @param {string} ticker - Stock ticker symbol
  * @returns {Promise<string|null>} - Saved file path or null if failed
  */
@@ -60,6 +60,50 @@ const downloadAndSaveImage = async (imageUrl, ticker) => {
     // Directory might already exist, ignore error
   }
   
+  // Handle data URLs (base64 encoded images)
+  if (imageUrl.startsWith('data:image/')) {
+    try {
+      // Extract image type and base64 data
+      const matches = imageUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+      if (!matches) {
+        throw new Error('Invalid data URL format');
+      }
+      
+      const imageType = matches[1]; // png, jpg, etc.
+      const base64Data = matches[2];
+      
+      // Determine file extension
+      let extension = '.png'; // default
+      if (imageType === 'jpeg' || imageType === 'jpg') {
+        extension = '.jpg';
+      } else if (imageType === 'png') {
+        extension = '.png';
+      } else if (imageType === 'svg+xml') {
+        extension = '.svg';
+      } else if (imageType === 'gif') {
+        extension = '.gif';
+      } else if (imageType === 'webp') {
+        extension = '.webp';
+      } else {
+        extension = `.${imageType}`;
+      }
+      
+      // Decode base64 and save
+      const buffer = Buffer.from(base64Data, 'base64');
+      const filename = `${ticker}${extension}`;
+      const filepath = path.join(STOCK_LOGOS_DIR, filename);
+      
+      await fs.writeFile(filepath, buffer);
+      
+      console.log(`Saved data URL image: ${filename}`);
+      return `/assets/stockLogos/${filename}`;
+    } catch (error) {
+      console.error('Error saving data URL image:', error);
+      return null;
+    }
+  }
+  
+  // Handle regular HTTP/HTTPS URLs
   return new Promise((resolve, reject) => {
     try {
       const url = new URL(imageUrl);
@@ -162,8 +206,8 @@ const scrapeStockLogo = async (query) => {
     // Wait for images to load
     await new Promise(r => setTimeout(r, 2000));
     
-    // Find the first image from the main results grid (skip suggestion chips)
-    const firstImagePosition = await page.evaluate(() => {
+    // Find the first image from the main results grid and log its HTML
+    const firstImageInfo = await page.evaluate(() => {
       // Find all image containers in the main results grid
       const mainGridImages = document.querySelectorAll('div[data-ri] img, div.rg_l img, div[jsname="sHclz"] img');
       
@@ -180,11 +224,16 @@ const scrapeStockLogo = async (query) => {
         
         // Check if image is large enough (suggestion chips are usually < 80px)
         if (img.naturalWidth > 80 || img.width > 80 || img.height > 80) {
-          const rect = img.getBoundingClientRect();
           return {
-            x: rect.left + rect.width / 2,
-            y: rect.top + rect.height / 2,
-            found: true
+            found: true,
+            html: img.outerHTML,
+            src: img.getAttribute('src'),
+            dataSrc: img.getAttribute('data-src'),
+            parentHtml: parentContainer.outerHTML.substring(0, 500), // First 500 chars of parent
+            tagName: img.tagName,
+            className: img.className,
+            id: img.id,
+            attributes: Array.from(img.attributes).map(attr => ({ name: attr.name, value: attr.value }))
           };
         }
       }
@@ -195,11 +244,13 @@ const scrapeStockLogo = async (query) => {
       
       for (const img of allImages) {
         if (img.naturalWidth > 80 || img.width > 80 || img.height > 80) {
-          const rect = img.getBoundingClientRect();
           validImages.push({
+            img: img,
             size: img.naturalWidth * img.naturalHeight || img.width * img.height,
-            x: rect.left + rect.width / 2,
-            y: rect.top + rect.height / 2
+            html: img.outerHTML,
+            src: img.getAttribute('src'),
+            dataSrc: img.getAttribute('data-src'),
+            parentHtml: img.parentElement ? img.parentElement.outerHTML.substring(0, 500) : null
           });
         }
       }
@@ -207,143 +258,60 @@ const scrapeStockLogo = async (query) => {
       if (validImages.length > 0) {
         validImages.sort((a, b) => b.size - a.size);
         return {
-          x: validImages[0].x,
-          y: validImages[0].y,
-          found: true
+          found: true,
+          html: validImages[0].html,
+          src: validImages[0].src,
+          dataSrc: validImages[0].dataSrc,
+          parentHtml: validImages[0].parentHtml,
+          tagName: validImages[0].img.tagName,
+          className: validImages[0].img.className,
+          id: validImages[0].img.id,
+          attributes: Array.from(validImages[0].img.attributes).map(attr => ({ name: attr.name, value: attr.value }))
         };
       }
       
       return { found: false };
     });
     
-    if (!firstImagePosition.found) {
+    if (!firstImageInfo.found) {
       console.error(`No image found for ${normalizedQuery}`);
       return null;
     }
     
-    // Get the browser instance to track new pages
-    const browser = await browserManager.getBrowser();
-    const initialPages = await browser.pages();
-    const initialPageCount = initialPages.length;
+    // Extract src from parent HTML and log it
+    let imageSrc = firstImageInfo.src || firstImageInfo.dataSrc;
     
-    // Right-click on the first image
-    await page.mouse.click(firstImagePosition.x, firstImagePosition.y, { button: 'right' });
-    await new Promise(r => setTimeout(r, 1000)); // Wait for context menu
-    
-    // Try multiple approaches to find and click "Open image in new tab"
-    let menuClicked = false;
-    
-    // Approach 1: Try XPath with various text patterns
-    const xpathPatterns = [
-      "//div[contains(text(), 'Open image')]",
-      "//div[contains(text(), 'View image')]",
-      "//div[contains(text(), 'Open image in new tab')]",
-      "//div[contains(text(), 'Open in new tab')]",
-      "//span[contains(text(), 'Open image')]",
-      "//span[contains(text(), 'View image')]",
-    ];
-    
-    for (const xpath of xpathPatterns) {
-      try {
-        const menuItem = await page.waitForXPath(xpath, { timeout: 1000, visible: true });
-        if (menuItem) {
-          await menuItem.click();
-          menuClicked = true;
-          console.log('Clicked menu item using XPath:', xpath);
-          break;
-        }
-      } catch (error) {
-        // Continue to next pattern
-        continue;
+    // If src is not in the image element, try to extract from parent HTML
+    if (!imageSrc || imageSrc.startsWith('data:')) {
+      // Extract src from parent HTML using regex
+      const srcMatch = firstImageInfo.parentHtml?.match(/src="([^"]+)"/);
+      if (srcMatch && srcMatch[1]) {
+        imageSrc = srcMatch[1];
       }
     }
     
-    // Approach 2: If XPath didn't work, try finding by evaluating
-    if (!menuClicked) {
-      const clicked = await page.evaluate(() => {
-        // Try various selectors for menu items
-        const selectors = [
-          'div[role="menuitem"]',
-          'div[jsname]',
-          'div[class*="menu"]',
-          'div[class*="MenuItem"]',
-          'span[role="menuitem"]',
-        ];
-        
-        for (const selector of selectors) {
-          const items = Array.from(document.querySelectorAll(selector));
-          for (const item of items) {
-            const text = (item.textContent || item.innerText || '').toLowerCase().trim();
-            if (text.includes('open image') || 
-                text.includes('view image') || 
-                (text.includes('open') && text.includes('image')) ||
-                text === 'open image in new tab') {
-              item.click();
-              return true;
-            }
-          }
+    // Console log only the src link
+    console.log('Image Src:', imageSrc);
+    
+    // Download and save the image if we have a valid src
+    if (imageSrc) {
+      // Convert relative URLs to absolute (but not data URLs)
+      if (!imageSrc.startsWith('data:') && !imageSrc.startsWith('http')) {
+        if (imageSrc.startsWith('//')) {
+          imageSrc = `https:${imageSrc}`;
+        } else if (imageSrc.startsWith('/')) {
+          imageSrc = `https://www.google.com${imageSrc}`;
         }
-        return false;
-      });
+      }
       
-      if (clicked) {
-        menuClicked = true;
-        console.log('Clicked menu item using evaluate');
+      const savedPath = await downloadAndSaveImage(imageSrc, normalizedQuery);
+      
+      if (savedPath) {
+        console.log(`Logo saved successfully: ${savedPath}`);
+        return savedPath;
       }
     }
-    
-    // Approach 3: Try keyboard navigation (arrow down + enter)
-    if (!menuClicked) {
-      await new Promise(r => setTimeout(r, 300));
-      // Press arrow down to select first menu item, then enter
-      await page.keyboard.press('ArrowDown');
-      await new Promise(r => setTimeout(r, 200));
-      await page.keyboard.press('Enter');
-      menuClicked = true;
-      console.log('Used keyboard navigation to select menu item');
-    }
-    
-    // Wait for new tab to open
-    await new Promise(r => setTimeout(r, 1500));
-    
-    // Get the new page (should be the image)
-    const allPages = await browser.pages();
-    let imagePage = null;
-    
-    if (allPages.length > initialPageCount) {
-      // New page was opened
-      imagePage = allPages[allPages.length - 1];
-    } else {
-      // Check if current page navigated to image
-      imagePage = page;
-    }
-    
-    // Wait a bit more for the image to load
-    await new Promise(r => setTimeout(r, 1000));
-    
-    const firstImageUrl = imagePage.url();
-    
-    // Close the image tab if it's a new tab
-    if (imagePage !== page) {
-      await imagePage.close();
-    }
-    
-    if (!firstImageUrl) {
-      console.error(`No image found for ${normalizedQuery}`);
-      return null;
-    }
-    
-    console.log(`Found image URL: ${firstImageUrl}`);
-    
-    // Download and save the image
-    const savedPath = await downloadAndSaveImage(firstImageUrl, normalizedQuery);
-    
-    if (savedPath) {
-      console.log(`Logo saved successfully: ${savedPath}`);
-      return savedPath;
-    }
-    
-    console.log(`Logo scraping completed for: ${normalizedQuery}`);
+     
     return null;
   } catch (error) {
     console.error(`Error scraping logo for ${normalizedQuery}:`, error);
