@@ -203,6 +203,7 @@ const scrapeStockLogo = async (query) => {
         '--disable-software-rasterizer',
       ],
       defaultViewport: { width: 1920, height: 1080 },
+      timeout: 30000, // 30 second timeout for browser launch
     });
 
     // Create a new page
@@ -210,12 +211,12 @@ const scrapeStockLogo = async (query) => {
     await page.setViewport({ width: 1920, height: 1080 });
     console.log(`Scraping logo for stock: ${normalizedQuery}`);
 
-    // Navigate to Google Images
-    //    await page.goto('https://www.google.com/search?q=ASTS+logo&tbs=isz:i&udm=2', { waitUntil: 'networkidle0' });
-
-    // Wait for the search box to be available and type the search query
+    // Navigate to Google Images search
     const searchQuery = `${normalizedQuery} stock logo`;
-    await page.goto(`https://www.google.com/search?q=${searchQuery}&tbs=isz:i&udm=2`, { waitUntil: 'networkidle0' });
+    await page.goto(`https://www.google.com/search?q=${searchQuery}&tbs=isz:i&udm=2`, { 
+      waitUntil: 'networkidle0',
+      timeout: 30000, // 30 second timeout for page navigation
+    });
     
     console.log(`Search completed for: ${normalizedQuery}`);
     
@@ -333,22 +334,45 @@ const scrapeStockLogo = async (query) => {
     console.error(`Error scraping logo for ${normalizedQuery}:`, error);
     return null;
   } finally {
-    // Always close the page and browser
+    // Always close the page and browser, even on connection errors
     try {
-      if (page && !page.isClosed()) {
-        await page.close();
+      if (page) {
+        try {
+          if (!page.isClosed()) {
+            await page.close();
+          }
+        } catch (pageError) {
+          // Page might already be closed or connection lost
+          console.error('Error closing page:', pageError.message);
+        }
       }
     } catch (error) {
-      console.error('Error closing page:', error);
+      console.error('Error accessing page:', error.message);
     }
     
     try {
       if (browser) {
-        await browser.close();
-        console.log(`Browser closed for ${normalizedQuery}`);
+        try {
+          // Check if browser is still connected before closing
+          if (browser.isConnected()) {
+            await browser.close();
+            console.log(`Browser closed for ${normalizedQuery}`);
+          } else {
+            console.log(`Browser already disconnected for ${normalizedQuery}`);
+          }
+        } catch (browserError) {
+          // Browser might already be closed or connection lost
+          console.error('Error closing browser:', browserError.message);
+          // Force cleanup
+          try {
+            browser.process()?.kill('SIGKILL');
+          } catch (killError) {
+            // Ignore kill errors
+          }
+        }
       }
     } catch (error) {
-      console.error('Error closing browser:', error);
+      console.error('Error accessing browser:', error.message);
     }
   }
 };
