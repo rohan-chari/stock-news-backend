@@ -7,7 +7,6 @@ const routes = require('./routes');
 const errorHandler = require('./middleware/errorHandler');
 const notFound = require('./middleware/notFound');
 const logger = require('./middleware/logger');
-const browserManager = require('./helpers/browserManager');
 
 /**
  * Initialize Express application
@@ -73,22 +72,11 @@ app.use(errorHandler);
  */
 const PORT = config.port;
 
-// Initialize browser on server start
-(async () => {
-  try {
-    await browserManager.initialize();
-    console.log('Browser initialized and ready');
-  } catch (error) {
-    console.error('Failed to initialize browser:', error);
-    // Continue server startup even if browser fails (for graceful degradation)
-  }
-
-  app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-    console.log(`Environment: ${config.nodeEnv}`);
-    console.log(`Health check: http://localhost:${PORT}/api/health`);
-  });
-})();
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+  console.log(`Environment: ${config.nodeEnv}`);
+  console.log(`Health check: http://localhost:${PORT}/api/health`);
+});
 
 module.exports = app;
 

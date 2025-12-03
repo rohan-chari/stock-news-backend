@@ -3,7 +3,7 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const { URL } = require('url');
-const browserManager = require('../helpers/browserManager');
+const puppeteer = require('puppeteer');
 const requestDeduplicator = require('../helpers/requestDeduplicator');
 
 /**
@@ -187,11 +187,27 @@ const scrapeStockLogo = async (query) => {
   if (!query) return null;
 
   const normalizedQuery = query.toUpperCase().trim();
+  let browser = null;
   let page = null;
 
   try {
-    // Create a new page from the shared browser
-    page = await browserManager.createPage();
+    // Create a new browser instance for this request
+    console.log(`Initializing browser for logo scrape: ${normalizedQuery}`);
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+      ],
+      defaultViewport: { width: 1920, height: 1080 },
+    });
+
+    // Create a new page
+    page = await browser.newPage();
+    await page.setViewport({ width: 1920, height: 1080 });
     console.log(`Scraping logo for stock: ${normalizedQuery}`);
 
     // Navigate to Google Images
@@ -317,9 +333,22 @@ const scrapeStockLogo = async (query) => {
     console.error(`Error scraping logo for ${normalizedQuery}:`, error);
     return null;
   } finally {
-    // Always close the page
-    if (page) {
-      //await browserManager.closePage(page);
+    // Always close the page and browser
+    try {
+      if (page && !page.isClosed()) {
+        await page.close();
+      }
+    } catch (error) {
+      console.error('Error closing page:', error);
+    }
+    
+    try {
+      if (browser) {
+        await browser.close();
+        console.log(`Browser closed for ${normalizedQuery}`);
+      }
+    } catch (error) {
+      console.error('Error closing browser:', error);
     }
   }
 };

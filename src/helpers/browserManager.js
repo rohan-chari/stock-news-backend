@@ -67,19 +67,25 @@ class BrowserManager {
   async _initializeBrowser() {
     console.log('Initializing browser instance...');
     
-    const browser = await puppeteer.launch({
-      headless: false, // Set to false for debugging
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--start-maximized', // Start browser maximized
-      ],
-      defaultViewport: null, // Use default viewport (full screen)
-    });
+    try {
+      const browser = await puppeteer.launch({
+        headless: 'new', // Use new headless mode for better compatibility
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-software-rasterizer',
+        ],
+        defaultViewport: { width: 1920, height: 1080 },
+      });
 
-    console.log('Browser initialized successfully');
-    return browser;
+      console.log('Browser initialized successfully');
+      return browser;
+    } catch (error) {
+      console.error('Error initializing browser:', error.message);
+      throw error;
+    }
   }
 
   /**
