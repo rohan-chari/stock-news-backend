@@ -5,6 +5,11 @@ const http = require('http');
 const { URL } = require('url');
 const puppeteer = require('puppeteer');
 const requestDeduplicator = require('../helpers/requestDeduplicator');
+const finnhub = require('finnhub');
+const config = require('../config');
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
 
 /**
  * Stock Service
@@ -95,7 +100,6 @@ const downloadAndSaveImage = async (imageUrl, ticker) => {
       
       await fs.writeFile(filepath, buffer);
       
-      console.log(`Saved data URL image: ${filename}`);
       return `/assets/stockLogos/${filename}`;
     } catch (error) {
       console.error('Error saving data URL image:', error);
@@ -192,7 +196,6 @@ const scrapeStockLogo = async (query) => {
 
   try {
     // Create a new browser instance for this request
-    console.log(`Initializing browser for logo scrape: ${normalizedQuery}`);
     browser = await puppeteer.launch({
       headless: 'new',
       args: [
@@ -209,7 +212,7 @@ const scrapeStockLogo = async (query) => {
     // Create a new page
     page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
-    console.log(`Scraping logo for stock: ${normalizedQuery}`);
+
 
     // Navigate to Google Images search
     const searchQuery = `${normalizedQuery} stock logo`;
@@ -218,7 +221,7 @@ const scrapeStockLogo = async (query) => {
       timeout: 30000, // 30 second timeout for page navigation
     });
     
-    console.log(`Search completed for: ${normalizedQuery}`);
+
     
     // Wait for images to load
     await new Promise(r => setTimeout(r, 2000));
@@ -307,8 +310,7 @@ const scrapeStockLogo = async (query) => {
       }
     }
     
-    // Console log only the src link
-    console.log('Image Src:', imageSrc);
+
     
     // Download and save the image if we have a valid src
     if (imageSrc) {
@@ -324,7 +326,7 @@ const scrapeStockLogo = async (query) => {
       const savedPath = await downloadAndSaveImage(imageSrc, normalizedQuery);
       
       if (savedPath) {
-        console.log(`Logo saved successfully: ${savedPath}`);
+
         return savedPath;
       }
     }
@@ -356,9 +358,9 @@ const scrapeStockLogo = async (query) => {
           // Check if browser is still connected before closing
           if (browser.isConnected()) {
             await browser.close();
-            console.log(`Browser closed for ${normalizedQuery}`);
+
           } else {
-            console.log(`Browser already disconnected for ${normalizedQuery}`);
+
           }
         } catch (browserError) {
           // Browser might already be closed or connection lost
@@ -378,6 +380,141 @@ const scrapeStockLogo = async (query) => {
 };
 
 /**
+ * Search stocks using Finnhub API
+ * @param {string} query - Search query
+ * @returns {Promise<Object>} - Search results from Finnhub
+ */
+const searchStocksWithFinnhub = (query) => {
+  return new Promise((resolve, reject) => {
+    if (!query) {
+      return resolve({ count: 0, result: [] });
+    }
+
+    const finnhubClient = new finnhub.DefaultApi();
+    finnhubClient.apiKey = config.finnhubApiKey || "cuu5a01r01qv6ijlqqg0cuu5a01r01qv6ijlqqgg";
+
+    finnhubClient.symbolSearch(query, { exchange: 'US' }, (error, data, response) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(data);
+      }
+    });
+  });
+};
+
+/**
+ * Find or create a stock in the database
+ * @param {Object} stockData - Stock data from Finnhub
+ * @param {string} stockData.symbol - Stock symbol
+ * @param {string} stockData.displaySymbol - Display symbol
+ * @param {string} stockData.description - Company description
+ * @param {string} stockData.type - Stock type
+ * @returns {Promise<Object>} - Stock object from database
+ */
+const findOrCreateStock = async (stockData) => {
+  const { symbol, displaySymbol, description, type } = stockData;
+  
+  if (!symbol) {
+    throw new Error('Stock symbol is required');
+  }
+
+  const normalizedSymbol = symbol.toUpperCase().trim();
+
+  // Check if stock exists in database
+  let stock = await prisma.stock.findUnique({
+    where: { symbol: normalizedSymbol },
+  });
+
+  // If stock doesn't exist, create it
+  if (!stock) {
+    stock = await prisma.stock.create({
+      data: {
+        symbol: normalizedSymbol,
+        displaySymbol: displaySymbol || normalizedSymbol,
+        description: description || null,
+        type: type || null,
+        exchange: 'US', // We're filtering by US exchange
+      },
+    });
+    console.log(`Created new stock in database: ${normalizedSymbol}`);
+  }
+
+  return stock;
+};
+
+/**
+ * Get logo path for a stock, checking DB first, then local assets
+ * @param {Object} stock - Stock object from database
+ * @returns {Promise<string|null>} - Logo path or null
+ */
+const getStockLogoPath = async (stock) => {
+  // First check DB logo
+  if (stock.logo) {
+    return stock.logo;
+  }
+
+  // If DB logo is null, check local assets folder
+  const localLogo = await checkStockLogo(stock.symbol);
+  
+  if (localLogo) {
+    // Update DB with local logo path
+    try {
+      await prisma.stock.update({
+        where: { id: stock.id },
+        data: { logo: localLogo },
+      });
+      console.log(`Updated stock ${stock.symbol} with local logo path: ${localLogo}`);
+    } catch (error) {
+      console.error(`Error updating logo path for stock ${stock.symbol}:`, error);
+    }
+    return localLogo;
+  }
+
+  return null;
+};
+
+/**
+ * Process a stock: check for logo and scrape if needed
+ * @param {Object} stock - Stock object from database
+ * @returns {Promise<string|null>} - Logo path or null
+ */
+const processStockLogo = async (stock) => {
+  let logoPath = stock.logo;
+  
+  // If logo exists in DB, return it
+  if (logoPath) {
+    return logoPath;
+  }
+
+  // Check if logo exists locally
+  logoPath = await checkStockLogo(stock.symbol);
+
+  // If logo doesn't exist locally, scrape it (with deduplication)
+  if (!logoPath) {
+    logoPath = await requestDeduplicator.execute(
+      `scrape-logo-${stock.symbol}`,
+      () => scrapeStockLogo(stock.symbol)
+    );
+  }
+  
+  // Update database with logo path if we found/scraped one (and stock doesn't have it)
+  if (logoPath && !stock.logo) {
+    try {
+      await prisma.stock.update({
+        where: { id: stock.id },
+        data: { logo: logoPath },
+      });
+      console.log(`Updated stock ${stock.symbol} with logo path: ${logoPath}`);
+    } catch (error) {
+      console.error(`Error updating logo path for stock ${stock.symbol}:`, error);
+    }
+  }
+
+  return logoPath;
+};
+
+/**
  * Search stocks by query
  * @param {string} query - Search query
  * @returns {Promise<Object>} - Search results
@@ -386,28 +523,153 @@ const searchStocks = async (query) => {
   if (!query) {
     return {
       query: '',
-      logo: null,
       results: [],
     };
   }
 
   const normalizedQuery = query.toUpperCase().trim();
+  const processedStocks = [];
+  const seenSymbols = new Set(); // Track unique symbols
 
-  // First, check if logo exists locally
-  let logoPath = await checkStockLogo(normalizedQuery);
+  // Step 1: Search database first
+  const dbStocks = await prisma.stock.findMany({
+    where: {
+      OR: [
+        { symbol: { startsWith: normalizedQuery, mode: 'insensitive' } },
+        { displaySymbol: { startsWith: normalizedQuery, mode: 'insensitive' } },
+        { description: { contains: normalizedQuery, mode: 'insensitive' } },
+      ],
+    },
+    take: 50, // Limit results
+  });
 
-  // If logo doesn't exist, scrape it (with deduplication)
-  if (!logoPath) {
-    logoPath = await requestDeduplicator.execute(
-      `scrape-logo-${normalizedQuery}`,
-      () => scrapeStockLogo(normalizedQuery)
-    );
+  console.log(`Found ${dbStocks.length} stocks in database for query: ${normalizedQuery}`);
+
+  // Step 2: Process stocks from database
+  for (const stock of dbStocks) {
+    if (seenSymbols.has(stock.symbol)) {
+      continue;
+    }
+    seenSymbols.add(stock.symbol);
+
+    try {
+      // Get logo path: check DB first, then local assets, update DB if found locally
+      let logoPath = await getStockLogoPath(stock);
+
+      // If we have stock and logo, return both
+      if (logoPath) {
+        processedStocks.push({
+          id: stock.id,
+          symbol: stock.symbol,
+          displaySymbol: stock.displaySymbol,
+          description: stock.description,
+          type: stock.type,
+          exchange: stock.exchange,
+          logo: logoPath,
+          createdAt: stock.createdAt,
+          updatedAt: stock.updatedAt,
+        });
+      } else {
+        // If we have stock but no logo, start scraper (async, don't wait)
+        processStockLogo(stock).then((logo) => {
+          // Update the stock in results if it's already there, or add it
+          const stockIndex = processedStocks.findIndex(s => s.id === stock.id);
+          if (stockIndex >= 0) {
+            processedStocks[stockIndex].logo = logo;
+          }
+        }).catch((error) => {
+          console.error(`Error processing logo for ${stock.symbol}:`, error);
+        });
+
+        // Add stock to results immediately (logo will be added async)
+        processedStocks.push({
+          id: stock.id,
+          symbol: stock.symbol,
+          displaySymbol: stock.displaySymbol,
+          description: stock.description,
+          type: stock.type,
+          exchange: stock.exchange,
+          logo: null, // Will be updated async
+          createdAt: stock.createdAt,
+          updatedAt: stock.updatedAt,
+        });
+      }
+    } catch (error) {
+      console.error(`Error processing stock ${stock.symbol}:`, error);
+    }
   }
+
+  // Step 3: If database doesn't have stocks, search Finnhub
+  if (dbStocks.length === 0) {
+    let finnhubResults = [];
+    try {
+      finnhubResults = await requestDeduplicator.execute(
+        `finnhub-search-${normalizedQuery}`,
+        () => searchStocksWithFinnhub(normalizedQuery)
+      );
+      console.log('Finnhub search data:', finnhubResults);
+    } catch (error) {
+      console.error('Error fetching Finnhub results:', error);
+      // Return empty results if Finnhub fails
+      return {
+        query: normalizedQuery,
+        results: [],
+      };
+    }
+
+    // Step 4: Process each stock from Finnhub results
+    const stocks = finnhubResults.result || [];
+
+    for (const stockData of stocks) {
+      try {
+        // Skip if we've already processed this symbol
+        const normalizedSymbol = stockData.symbol?.toUpperCase().trim();
+        if (!normalizedSymbol || seenSymbols.has(normalizedSymbol)) {
+          continue;
+        }
+        seenSymbols.add(normalizedSymbol);
+
+        // Find or create stock in database
+        const stock = await findOrCreateStock(stockData);
+        
+        // Get logo path: check DB first, then local assets, then scrape if needed
+        let logoPath = await getStockLogoPath(stock);
+        
+        // If no logo found, process (scrape) it
+        if (!logoPath) {
+          logoPath = await processStockLogo(stock);
+        }
+
+        // Add processed stock to results
+        processedStocks.push({
+          id: stock.id,
+          symbol: stock.symbol,
+          displaySymbol: stock.displaySymbol,
+          description: stock.description,
+          type: stock.type,
+          exchange: stock.exchange,
+          logo: logoPath,
+          createdAt: stock.createdAt,
+          updatedAt: stock.updatedAt,
+        });
+      } catch (error) {
+        console.error(`Error processing stock ${stockData.symbol}:`, error);
+        // Continue with other stocks even if one fails
+      }
+    }
+  }
+
+  // Ensure uniqueness by symbol (additional safety check)
+  const uniqueStocks = processedStocks.reduce((acc, stock) => {
+    if (!acc.find(s => s.symbol === stock.symbol)) {
+      acc.push(stock);
+    }
+    return acc;
+  }, []);
 
   return {
     query: normalizedQuery,
-    logo: logoPath,
-    results: [],
+    results: uniqueStocks,
   };
 };
 

@@ -17,7 +17,6 @@ class RequestDeduplicator {
   async execute(key, requestFn) {
     // If a request for this key is already pending, return the same promise
     if (this.pendingRequests.has(key)) {
-      console.log(`Request deduplication: reusing pending request for key: ${key}`);
       return this.pendingRequests.get(key);
     }
 

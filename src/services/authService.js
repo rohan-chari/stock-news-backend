@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const verifyAppleToken = require('../helpers/verifyAppleToken');
+const userService = require('./userService');
 
 /**
  * Auth Service
@@ -24,25 +25,15 @@ const verifyAppleAuth = async (token, email, givenName, familyName) => {
   const applePayload = await verifyAppleToken(token);
   const appleSub = applePayload.sub; // Apple user ID (unique per app)
 
-  // TODO: Replace with actual database lookup
-  // const user = await db.findUserByProvider('apple', appleSub);
-  // if (!user) {
-  //   user = await db.createUser({
-  //     email: email ?? null,
-  //     name: `${givenName ?? ''} ${familyName ?? ''}`.trim() || null,
-  //     provider: 'apple',
-  //     providerId: appleSub,
-  //   });
-  // }
-
-  // Placeholder user object
-  const user = {
-    id: '123', // This should come from your database
-    email: email ?? null,
-    name: `${givenName ?? ''} ${familyName ?? ''}`.trim() || null,
-    provider: 'apple',
-    providerId: appleSub,
-  };
+  // Find or create user by Apple provider
+  const user = await userService.findOrCreateUserByProvider(
+    'apple',
+    appleSub,
+    {
+      email: email ?? null,
+      name: `${givenName ?? ''} ${familyName ?? ''}`.trim() || null,
+    }
+  );
 
   return user;
 };
