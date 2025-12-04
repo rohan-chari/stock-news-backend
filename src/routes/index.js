@@ -2,6 +2,7 @@ const express = require('express');
 const exampleRoutes = require('./exampleRoutes');
 const stockRoutes = require('./stockRoutes');
 const authRoutes = require('./authRoutes');
+const watchlistRoutes = require('./watchlistRoutes');
 const { getAllRoutes, registerRoute } = require('../helpers/routeRegistry');
 
 const router = express.Router();
@@ -13,6 +14,7 @@ const router = express.Router();
 router.use('/examples', exampleRoutes);
 router.use('/stocks', stockRoutes);
 router.use('/auth', authRoutes);
+router.use('/watchlist', watchlistRoutes);
 
 /**
  * Health check endpoint

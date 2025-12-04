@@ -7,6 +7,7 @@ const routes = require('./routes');
 const errorHandler = require('./middleware/errorHandler');
 const notFound = require('./middleware/notFound');
 const logger = require('./middleware/logger');
+const cronJobs = require('./services/cronJobs');
 
 /**
  * Initialize Express application
@@ -76,6 +77,9 @@ app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Environment: ${config.nodeEnv}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
+  
+  // Initialize cron jobs (only runs on schedule, not on startup)
+  cronJobs.initializeCronJobs();
 });
 
 module.exports = app;
