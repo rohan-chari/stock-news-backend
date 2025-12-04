@@ -32,7 +32,10 @@ const searchStocks = async (query) => {
         { description: { contains: normalizedQuery, mode: 'insensitive' } },
       ],
     },
-    take: 50, // Limit results
+    orderBy: {
+      symbol: 'asc', // Alphabetical order by ticker
+    },
+    take: 25, // Limit results
   });
 
   console.log(`Found ${dbStocks.length} stocks in database for query: ${normalizedQuery}`);

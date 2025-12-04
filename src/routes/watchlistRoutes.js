@@ -30,5 +30,8 @@ registerRoute('POST', '/watchlist', 'Add or remove stock from watchlist (require
 router.get('/', authenticate, watchlistController.getWatchlist);
 registerRoute('GET', '/watchlist', 'Get user watchlist (requires authentication)');
 
+router.get('/news', authenticate, watchlistController.getNews);
+registerRoute('GET', '/watchlist/news', 'Get news for a stock by stockId (requires authentication, query param: stockId)');
+
 module.exports = router;
 

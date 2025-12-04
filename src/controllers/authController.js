@@ -16,9 +16,7 @@ const { validateRequest } = require('../helpers/validationHelper');
 const authenticateApple = async (req, res, next) => {
   try {
     // Log the full request body
-    console.log('=== Apple Auth Request Received ===');
-    console.log('Full request body:', JSON.stringify(req.body, null, 2));
-    console.log('Request headers:', JSON.stringify(req.headers, null, 2));
+
     
     const validationError = validateRequest(req);
     if (validationError) {
@@ -28,13 +26,7 @@ const authenticateApple = async (req, res, next) => {
 
     const { token, email, givenName, familyName } = req.body;
     
-    // Log extracted fields
-    console.log('Extracted fields:');
-    console.log('  - token:', token ? `${token.substring(0, 50)}...` : 'undefined');
-    console.log('  - email:', email || 'undefined');
-    console.log('  - givenName:', givenName || 'undefined');
-    console.log('  - familyName:', familyName || 'undefined');
-    console.log('===================================');
+
 
     // Verify Apple token and get/create user
     const user = await authService.verifyAppleAuth(token, email, givenName, familyName);

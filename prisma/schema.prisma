@@ -57,6 +57,8 @@ model Stock {
 
   // Users who have this stock in their watchlist
   userStocks UserStock[]
+  // News articles for this stock
+  news News[]
 
   @@map("stocks")
 }
@@ -74,5 +76,25 @@ model UserStock {
   // Ensure a user can only have a stock once in their watchlist
   @@unique([userId, stockId])
   @@map("user_stocks")
+}
+
+model News {
+  id        String   @id @default(uuid())
+  stockId   String
+  finnhubId Int      @unique // Finnhub's article ID
+  category  String?
+  headline  String
+  summary   String?
+  url       String   @unique
+  image     String?
+  source    String?
+  datetime  DateTime // When the article was published (converted from Unix timestamp)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@index([stockId, createdAt])
+  @@map("news")
 }
 

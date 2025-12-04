@@ -60,8 +60,35 @@ const getWatchlist = async (req, res, next) => {
   }
 };
 
+/**
+ * Get news for a stock by stockId
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Function} next - Express next middleware
+ */
+const getNews = async (req, res, next) => {
+  try {
+    const { stockId } = req.query;
+    
+    if (!stockId) {
+      return sendError(res, 'stockId query parameter is required', 400);
+    }
+    
+    const newsService = require('../services/newsService');
+    const articles = await newsService.fetchAndSaveNews(stockId);
+    
+    sendSuccess(res, { articles }, 'News retrieved successfully');
+  } catch (error) {
+    if (error.message === 'Stock not found') {
+      return sendError(res, error.message, 400);
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   toggleStock,
   getWatchlist,
+  getNews,
 };
 
