@@ -75,7 +75,7 @@ const getNews = async (req, res, next) => {
     }
     
     const newsService = require('../services/newsService');
-    const articles = await newsService.fetchAndSaveNews(stockId);
+    const articles = await newsService.getNewsForStock(stockId);
     
     sendSuccess(res, { articles }, 'News retrieved successfully');
   } catch (error) {
@@ -86,9 +86,29 @@ const getNews = async (req, res, next) => {
   }
 };
 
+/**
+ * Get news for all stocks in user's watchlist
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Function} next - Express next middleware
+ */
+const getAllNews = async (req, res, next) => {
+  try {
+    const userId = req.userId; // From authenticate middleware
+    
+    const newsService = require('../services/newsService');
+    const articles = await newsService.getNewsForUserStocks(userId);
+    
+    sendSuccess(res, { articles }, 'News retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   toggleStock,
   getWatchlist,
   getNews,
+  getAllNews,
 };
 

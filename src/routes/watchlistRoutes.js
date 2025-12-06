@@ -33,5 +33,8 @@ registerRoute('GET', '/watchlist', 'Get user watchlist (requires authentication)
 router.get('/news', authenticate, watchlistController.getNews);
 registerRoute('GET', '/watchlist/news', 'Get news for a stock by stockId (requires authentication, query param: stockId)');
 
+router.get('/news/all', authenticate, watchlistController.getAllNews);
+registerRoute('GET', '/watchlist/news/all', 'Get news for all stocks in user watchlist (requires authentication)');
+
 module.exports = router;
 
